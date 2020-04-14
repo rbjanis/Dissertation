@@ -1,0 +1,451 @@
+---
+title: "Results"
+author: "Rebecca Janis"
+output: word_document
+---
+```{r}
+require(tidyverse)
+knitr::opts_chunk$set(echo = F, include=F)
+```
+
+```{r}
+change_data <- readd(change_data)
+deter_data <- readd(deter_data)
+roc_data <- readd(roc_data)
+change_models <- readd(change_models)
+deter_models <- readd(deter_models)
+change_shape <- readd(change_shape)
+roc_models <- readd(roc_models)
+```
+
+## Descriptives
+```{r, child="descriptives.rmd"}
+
+```
+
+## Pre to post change
+### Effect of feedback
+Although the direction of the effect across all subscales was toward additional positive change ocurring in the feedback condition, none of the coefficients were significant, indicating no significant effect of feedback on the amount of CCAPS change clients experienced. 
+
+#### Plots of results by subscale
+
+### Differences across domains
+### Center effect
+Center effects were significant on some subscale, indicating center variance around the overall effects. This indicates that feedback may have been more effective at some centers. It will be important to study center characteristics associated with positive feedback effects to understand what those centers may have been doing differently. Although outside the scope of this study, the discussion will explore possible center policies and characteristics that may be associated with positive feedback effects.   
+
+### Moderators
+A few significant moderating effects, but R2 of 0.
+Discuss main effects of predictors on outcome?
+```{r}
+# Positive change is improvement
+change_params_feedback <- suppressWarnings(map_df(change_models[1:8], function(x) {broom.mixed::tidy(x[["feedback_random"]])}, .id = "subscale")) %>%
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(-c(effect, group, statistic, df, `p.value`, `std.error`)) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+    mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           Intercept = "sd_(Intercept)",
+                           Correlation = "cor_feedback.(Intercept)",
+                           Feedback = "sd_feedback",
+                           Residual = "sd_Observation"))
+# No feedback terms significant
+
+change_params_fixed <- suppressWarnings(map_df(change_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale")) %>%
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(-c(effect, group, statistic, df, `p.value`, `std.error`)) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>%
+  slice(1:14) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+  mutate(term = str_replace(term, ":", "*")) %>% 
+  mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           `Off track` = "outcome_alert",
+                           `Client baseline` = "outcome_first_centered",
+                           `Center baseline` = "outcome_first_center",
+                           `CCAPS frequency` = "ccaps_freq",
+                           `Appointment N` = "appt_n",
+                           Hospitalization = "hospitalization",
+                           `Feedback * Off track` = "feedback*outcome_alert",
+                           `Feedback * Client baseline` = "feedback*outcome_first_centered",
+                           `Feedback * Center baseline` = "feedback*outcome_first_center",
+                           `Feedback * CCAPS frequency` = "feedback*ccaps_freq",
+                           `Feedback * Appointment N` = "feedback*appt_n",
+                           `Feedback * Hospitalization` = "feedback*hospitalization"))
+
+change_params_random <- suppressWarnings(map_df(change_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale")) %>% 
+  select(-c(effect, group, statistic, df, `p.value`, `std.error`)) %>%
+  pivot_wider(names_from = subscale, values_from = estimate) %>%
+  slice(15, 17, 18) %>% 
+  mutate(term = c("Intercept", "Feedback", "Residual")) %>% 
+  mutate(across(is.numeric, function(x) x^2), across(is.numeric, round, 2))
+change_params_mods <- plyr::rbind.fill(change_params_fixed, data.frame(term = c("Random Effects Variance")), change_params_random)
+```
+
+```{r}
+change_Ns <- map_df(change_models[1:8], function(x) {data.frame(Centers = x[["moderators"]][["dims"]][["ngrps"]][1], Clients = x[["moderators"]][["dims"]][["N"]])}, .id = "subscale") %>% 
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  mutate(term = c("Center N", "Client N"), .before = 1)
+```
+
+```{r}
+change_params_feedback <- rbind(change_params_feedback, change_Ns)
+write.csv(change_params_feedback, file = "results/change-params-feedback-only.csv", row.names = F)
+
+change_params_mods <- rbind(change_params_mods, change_Ns)
+write.csv(change_params_mods, file = "results/change-params-mods.csv", row.names = F, na = "")
+```
+
+```{r}
+change_LRTs1 <- map_df(change_models[1:8], function(x) {anova(x[["null"]], x[["feedback"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# Feedback improved Anxiety, Social Anxiety, and Eating models
+
+change_LRTs2 <- map_df(change_models[1:8], function(x) {anova(x[["feedback"]], x[["feedback_random"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# Random effect of feedback for Depression, Anxiety, Social Anxiety, Alcohol, and DI
+```
+
+```{r}
+change_R2 <- suppressWarnings(map_df(change_models[1:8], function(x) {r2glmm::r2beta(x[["feedback_random"]], method = 'nsj')}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq) %>% 
+  mutate_if(is.numeric, scales::percent, accuracy = .1)
+
+save(change_R2, file = "results/change_r2.rda")
+
+change_R2_mods <- suppressWarnings(map_df(change_models[1:8], function(x) {r2glmm::r2beta(x[["moderators"]], method = 'nsj')}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq) %>% 
+  mutate_if(is.numeric, scales::percent, accuracy = .1)
+
+save(change_R2_mods, file = "results/change_r2.rda")
+```
+
+```{r}
+save(change_params_feedback, change_params_mods, change_LRTs1, change_LRTs2, change_R2, change_R2_mods, change_Ns, file = "results/change_results.rda")
+```
+
+## Deterioration
+### Effect of feedback
+#### Plots of results by subscale
+### Differences across domains
+### Center effect
+### Moderators
+```{r}
+deter_rates_overall <- deter_data %>%
+  group_by(feedback) %>%
+  summarize_at(vars(Depression34_deter:DI_deter), list(function(x) mean(x == 1, na.rm = T))) %>% 
+  mutate_at(vars(-feedback), scales::percent, accuracy = .1)
+
+# Deterioration rates for the sample included
+# deter_rates_cut <- map_dfc(c("Depression34", "Anxiety34", "Social_Anxiety34", "Academics34",
+#                 "Eating34", "Hostility34", "Alcohol34", "DI"), get_deter_rates) %>% 
+#   mutate_all(scales::percent, accuracy = .1) %>% 
+#   mutate(feedback = c(0, 1), .before = 1)
+```
+
+```{r}
+deter_params_feedback <- suppressWarnings(map_df(deter_models[1:8], function(x) {broom.mixed::tidy(x[["feedback"]])}, .id = "subscale")) %>%
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(subscale, term, estimate, SE) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+  filter(term != 	"sd__(Intercept)") %>% 
+  mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback"))
+
+# No significant effects of feedback
+
+deter_params_mods <- suppressWarnings(map_df(deter_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale")) %>%
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(subscale, term, estimate, SE) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>%
+  slice(1:14) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+  mutate(term = str_replace(term, ":", "*")) %>% 
+  mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           `Client baseline` = "outcome_first_centered",
+                           `Center baseline` = "outcome_first_center",
+                           `CCAPS frequency` = "ccaps_freq",
+                           `Appointment N` = "appt_n",
+                           Hospitalization = "hospitalization",
+                           `Feedback * Client baseline` = "feedback*outcome_first_centered",
+                           `Feedback * Center baseline` = "feedback*outcome_first_center",
+                           `Feedback * CCAPS frequency` = "feedback*ccaps_freq",
+                           `Feedback * Appointment N` = "feedback*appt_n",
+                           `Feedback * Hospitalization` = "feedback*hospitalization")) %>% 
+  filter(term != 	"sd__(Intercept)")
+```
+
+```{r}
+deter_LRTs1 <- map_df(deter_models[1:8], function(x) {anova(x[["null"]], x[["feedback"]])}, .id = "subscale")  %>%
+  filter(!is.na(Chisq)) %>% 
+  mutate(Chisq = round(Chisq, 2),
+         Chisq = case_when(`Pr(>Chisq)` < .001 ~ paste0(Chisq, "**"),
+                         `Pr(>Chisq)` < .01 ~ paste0(Chisq, "*"),
+                         TRUE ~ as.character(Chisq, "**"))) %>%
+  select(subscale, Chisq) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+
+# No significant LRTs for FE of feedback
+
+deter_LRTs2 <- map_df(deter_models[1:8], function(x) {anova(x[["feedback"]], x[["feedback_random"]])}, .id = "subscale")  %>%
+  filter(!is.na(Chisq)) %>% 
+  mutate(Chisq = round(Chisq, 2),
+         Chisq = case_when(`Pr(>Chisq)` < .001 ~ paste0(Chisq, "**"),
+                         `Pr(>Chisq)` < .01 ~ paste0(Chisq, "*"),
+                         TRUE ~ as.character(Chisq, "**"))) %>%
+  select(subscale, Chisq) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# No significant random effects
+```
+
+```{r}
+deter_Ns <- map_df(deter_models[1:8], function(x) {data.frame(Centers = x[["null"]]@Gp[2], Clients = NROW(x[["null"]]@frame))}, .id = "subscale") %>% 
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("metric")
+```
+
+```{r}
+deter_R2 <- suppressWarnings(map_df(deter_models[1:8], function(x) {r2glmm::r2beta(x[["feedback"]], method = 'nsj')}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq) %>% 
+  mutate_if(is.numeric, scales::percent, accuracy = .1)
+
+deter_R2_mods <- suppressWarnings(map_df(deter_models[1:8], function(x) {r2glmm::r2beta(x[["moderators"]], method = 'nsj')}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq) %>% 
+  mutate_if(is.numeric, scales::percent, accuracy = .1)
+```
+
+## Rate of change
+### Effect of feedback
+#### Plots of results by subscale
+### Differences across domains
+### Center effect
+### Moderators
+```{r}
+shape_anovas <- map_df(change_shape[1:8], function(x) anova(x[["linear"]], x[["loglinear"]], x[["log10linear"]],  x[["inverse"]], x[["quad"]])) %>% 
+  rownames_to_column("model") %>% 
+  separate(col = model, into = c("subscale", "model"), sep = "\\.\\.\\.", extra = "merge", fill = "left") %>% 
+  mutate(model = stringr::str_remove(model, 'x\\[\\[\\"'),
+         model = stringr::str_remove(model, '"\\]\\]'))
+
+(best_shape <- shape_anovas %>% group_by(subscale) %>% 
+  filter(BIC == min(BIC)) %>% 
+  select(subscale, model, BIC))
+
+shape_anovas %>% group_by(subscale) %>% 
+  filter(AIC == min(AIC)) %>% 
+  select(subscale, model, AIC)
+
+shape_anovas %>% group_by(subscale) %>% 
+  filter(logLik == max(logLik)) %>% 
+  select(subscale, model, logLik)
+```
+
+```{r}
+roc_params_feedback_fixed <- suppressWarnings(map_df(roc_models[1:8], function(x) {broom.mixed::tidy(x[["feedback_random"]])}, .id = "subscale")) %>%
+  mutate(term = str_remove(term, "log_"),
+         term = str_remove(term, "inv_")) %>% 
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-c(effect, group, statistic, `p.value`, `std.error`, SE, df)) %>%
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate(term = fct_recode(term, "Slope" = "appt_seq", "Slope * Feedback" = "appt_seq:feedback"))
+
+# Depression, Anxiety, Social, Eating, DI significant
+
+roc_params_feedback_fixed <- select(best_shape, -BIC) %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as_tibble() %>% 
+  mutate(term = "Transformation", .before = 1) %>% 
+  rbind(roc_params_feedback_fixed)
+
+roc_feedback_random <- suppressWarnings(map_df(roc_models[1:8], function(x) {as.data.frame(t(VarCorr(x[["feedback_random"]])[c(2,3,5,6),1]))}, .id = "subscale")) %>% 
+  pivot_longer(cols = -subscale, names_to = "term", values_to = "values") %>% 
+  mutate(term = rep(c("Center Slope", "Center Slope * Feedback", "Client Slope", "Residual", "Center Slope", "Center Slope * Feedback", "Client Slope"), 8)) %>% 
+  filter(!is.na(values)) %>% 
+  mutate(values = round(as.numeric(as.character(values)), 2)) %>% 
+  pivot_wider(names_from = subscale, values_from = values)
+
+roc_params_feedback <- rbind(roc_params_feedback_fixed, roc_feedback_random)
+write.csv(roc_params_feedback, file = "results/roc-params-feedback.csv", na = "", row.names = F)
+
+roc_params_mods_fixed <- suppressWarnings(map_df(roc_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale")) %>%
+  mutate(term = str_remove(term, "log_"),
+         term = str_remove(term, "inv_")) %>% 
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-c(effect, group, statistic, `p.value`, `std.error`, SE, df)) %>%
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate(term = str_replace(term, "appt_seq", "Slope"),
+         term = str_replace_all(term, ":", " * "),
+         term = str_replace(term, "feedback", "Feedback"),
+         term = str_replace(term, "outcome_first_centered", "Client baseline"),
+         term = str_replace(term, "outcome_first_center", "Center baseline"),
+         term = str_replace(term, "outcome_alert", "Off track"),
+         term = str_replace(term, "ccaps_freq", "CCAPS Frequency"),
+         term = str_replace(term, "appt_n", "Appointment N"),
+         term = str_replace(term, "hospitalization", "Hospitalization"))
+
+roc_params_mods_fixed <- select(best_shape, -BIC) %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as_tibble() %>% 
+  mutate(term = "Transformation", .before = 1) %>% 
+  rbind(roc_params_mods_fixed)
+
+write.csv(roc_params_mods_fixed, file = "results/roc-params-mods.csv", na = "", row.names = F)
+
+roc_mods_random <- suppressWarnings(map_df(roc_models[1:8], function(x) {as.data.frame(t(VarCorr(x[["moderators"]])[c(2,3,5,6),1]))}, .id = "subscale")) %>% 
+  pivot_longer(cols = -subscale, names_to = "term", values_to = "values") %>% 
+  filter(!is.na(values)) %>% 
+  mutate(term = rep(c("Center Slope", "Center Slope * Feedback", "Client Slope", "Residual"), 8)) %>% 
+  mutate(values = round(as.numeric(as.character(values)), 2)) %>% 
+  pivot_wider(names_from = subscale, values_from = values)
+```
+
+```{r}
+
+```
+
+```{r}
+roc_LRTs1 <- map_df(roc_models[1:8], function(x) {anova(x[["null"]], x[["feedback"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+
+# Depression, Anxiety, Social, eating, DI significant
+
+roc_LRTs2 <- map_df(roc_models[1:8], function(x) {anova(x[["feedback"]], x[["feedback_random"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# Random effect significant for depression, anxiety, social, hostility, alcohol, and DI
+```
+
+```{r}
+roc_R2 <- suppressWarnings(map_df(roc_models[1:8], function(x) {r2glmm::r2beta(x[["feedback_random"]], method = "nsj")}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq)
+
+roc_R2 <- suppressWarnings(map_df(roc_models[1:8], function(x) {r2glmm::r2beta(x[["moderators"]], method = "nsj", method = "nsj")}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq)
+```
+
+```{r}
+roc_Ns <- map_df(roc_models[1:8], function(x) {data.frame(Centers = x[["null"]][["dims"]][["ngrps"]][1], Clients = x[["null"]][["dims"]][["N"]])}, .id = "subscale") %>% 
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as.data.frame()
+```
+
+
+
+
+
+
+
+
