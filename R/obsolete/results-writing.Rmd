@@ -1,0 +1,521 @@
+---
+title: "Results"
+output: 
+    word_document:
+      reference_docx: word_template.docx
+---
+```{r setup, echo = F, include = F}
+source(here::here("R/packages.R"))
+source(here::here("R/funs_cleaning.R"))
+source(here::here("R/funs_descriptives.R"))
+source(here::here("R/funs_results.R"))
+
+knitr::opts_chunk$set(echo = F, 
+                      fig.width = 8,
+                      fig.height = 6,
+                      dpi = 300,
+                      dev = "png",
+                      cache = TRUE,
+                      cache.lazy = FALSE,
+                      message = F,
+                      warning = F,
+                      knitr.table.format = "markdown")
+theme_set(theme_bw())
+```
+
+```{r load}
+# change_data <- readd(change_data)
+deter_data <- readd(deter_data)
+roc_data_intermediate <- readd(roc_data_intermediate)
+roc_data <- readd(roc_data)
+change_data <- readd(change_data)
+
+change_models <- readd(change_models)
+deter_models <- readd(deter_models)
+change_shape <- readd(change_shape)
+roc_models <- readd(roc_models)
+
+moderators <- readd(moderators)
+alphas <- readd(alphas)
+alert_data <- readd(alert_data)
+# deter_r2_feedback <- readd(deter_r2_feedback)
+# deter_r2_mods <- readd(deter_r2_mods)
+# change_r2_feedback <- readd(change_r2_feedback)
+# change_R2_mods <- readd(change_R2_mods)
+```
+
+A total of `r format_number(NROW(change_data))` clients from `r format_number(n_distinct(change_data$CcmhID))` center were included in analyses, although some subscales had reduced numbers due to clients not being able to go off track or deteriorate on certain subscales. Total clients and centers for each subscale are included in the results table for each model. Of the `r format_number(NROW(change_data))` clients, `r format_number(sum(change_data$feedback == 0))` were in the no feedback condition and `r format_number(sum(change_data$feedback == 1))` were in the feedback condition. Table 1 shows the data reduction process and the number of clients and centers lost at each step. 
+
+```{r sessions}
+sessions <- group_by(roc_data, UniqueClientID) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(appt_N)
+```
+
+After removing sessions above 20, clients attended from 3 to 20 individual sessions, with a mean of `r round(mean(sessions$appt_N),2)`, a SD of `r round(sd(sessions$appt_N),2)`, a median of `r median(sessions$appt_N)`, and a mode of `r CCMHr::get_mode(sessions$appt_N)`. Clients in the feedback condition had higher starting CCAPS scores on some subscales, consistent with increasing trends in CCAPS scores during the time period the data was collected (CITE HENRY). Clients in the feedback condition also attended .7 more sessions on average, had more frequent CCAPS administrations, and were less likely to have a prior hospitalization. Table 2 compares all moderators by feedback condition, as well as other demographic variables. 
+
+```{r alphas}
+# alphas <- alphas %>%
+#   column_to_rownames("Subscale") %>%
+#   t() %>%
+#   as_tibble() %>%
+#   mutate(alpha = "Overall alpha", .before = 1)
+```
+Internal consistencies for CCAPS subscales from data included in the present study were in line with established psychometrics for this scale, with alphas ranging from `r min(alphas$Alpha)` on `r str_remove(alphas$Subscale[which.min(alphas$Alpha)], "_")` and `r max(alphas$Alpha)` on `r alphas$Subscale[which.max(alphas$Alpha)]`. 
+
+```{r prop-alert}
+alerts <- group_by(roc_data, UniqueClientID, feedback) %>% 
+  summarize(across(contains("alert"), max, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(across(contains("alert"), function(x) ifelse(!is.finite(x), NA, x)))
+
+alerts_condition <- group_by(alerts, feedback) %>% 
+  summarize(across(contains("alert"), function(x) scales::percent(mean(x, na.rm = T), accuracy = .01)))
+
+alerts_overall <- summarize(alerts, across(contains("alert"), function(x) mean(x, na.rm = T))) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(alert_percent = V1) %>% 
+  rownames_to_column("subscale") %>% 
+  filter(subscale != "alert_any") %>% 
+  mutate(subscale = str_remove(subscale, "_alert"),
+         subscale = str_remove(subscale, "34")) 
+```
+Across both feedback conditions, `r scales::percent(mean(alerts$alert_any), accuracy = .01)` of clients went off track on at least one subscale at some point during treatment, and this was identical across no feedback and feedback conditions. The percentage of clients going off track on each subscale ranged from `r scales::percent(min(alerts_overall$alert_percent), .01)` on the `r alerts_overall$subscale[which.min(alerts_overall$alert_percent)]` to `r scales::percent(max(alerts_overall$alert_percent), .01)` on `r alerts_overall$subscale[which.max(alerts_overall$alert_percent)]`. The proportion of clients going off track on each subscale also did not differ between conditions. 
+
+```{r number-alerts, eval=FALSE, include=FALSE}
+number_alerts <- group_by(alert_data, UniqueClientID) %>% 
+  select(UniqueClientID, subscale, alert, appt_seq) %>% 
+  pivot_wider(names_from = subscale, values_from = alert) %>% 
+  summarize(across(Depression34:DI, function(x) sum(x, na.rm = T)))
+
+number_alerts %>% 
+  pivot_longer(cols = c(Depression34:DI), names_to = "subscale", values_to = "total_alerts") %>% 
+  ggplot(aes(x = total_alerts)) +
+  geom_histogram() +
+  facet_wrap(~subscale)
+```
+
+## Deterioration
+```{r deter-ns}
+deter_Ns <- map_df(deter_models[1:8], function(x) {data.frame(`Center N` = x[["null"]]@Gp[2], `Client N` = NROW(x[["null"]]@frame))}, .id = "subscale") %>% 
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("term")
+```
+
+```{r deter-lrts}
+deter_LRTs1 <- map_df(deter_models[1:8], function(x) {anova(x[["null"]], x[["feedback"]])}, .id = "subscale")  %>%
+  filter(!is.na(Chisq)) %>% 
+  mutate(Chisq = round(Chisq, 2),
+         Chisq = case_when(`Pr(>Chisq)` < .001 ~ paste0(Chisq, "**"),
+                         `Pr(>Chisq)` < .01 ~ paste0(Chisq, "*"),
+                         TRUE ~ as.character(Chisq, "**"))) %>%
+  select(subscale, Chisq) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>% 
+  mutate(term = "LRT for feedback")
+# LRT significant for DI
+
+deter_LRTs2 <- map_df(deter_models[1:8], function(x) {anova(x[["feedback"]], x[["feedback_random"]])}, .id = "subscale")  %>%
+  filter(!is.na(Chisq)) %>% 
+  mutate(Chisq = round(Chisq, 2),
+         Chisq = case_when(`Pr(>Chisq)` < .001 ~ paste0(Chisq, "**"),
+                         `Pr(>Chisq)` < .01 ~ paste0(Chisq, "*"),
+                         TRUE ~ as.character(Chisq, "**"))) %>%
+  select(subscale, Chisq) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>% 
+  mutate(term = "LRT for random effect of feedback")
+# No significant random effects
+
+DI_lrt <- anova(deter_models[["DI"]][["null"]], deter_models[["DI"]][["feedback"]])
+```
+
+```{r deter-feedback-params}
+deter_params_feedback_raw <- suppressWarnings(map_df(deter_models[1:8], function(x) {broom.mixed::tidy(x[["feedback"]])}, .id = "subscale"))
+
+deter_params_feedback <- mutate(deter_params_feedback_raw, estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(subscale, term, estimate, SE) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           `Random Intercept` = "sd__(Intercept)")) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+  rbind(deter_LRTs1) %>% 
+  rbind(deter_LRTs2) %>% 
+  rbind(deter_Ns) %>% 
+  mutate(term = str_replace(term, "\\.", " ")) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+# Significant effect on DI only
+```
+
+```{r deter-rates}
+deter_rates <- deter_data %>%
+  group_by(feedback) %>%
+  summarize_at(vars(Depression34_deter:DI_deter), list(function(x) mean(x == 1, na.rm = T))) %>% 
+  mutate_at(vars(-feedback), scales::percent, accuracy = .1) %>% 
+  mutate(`Feedback Condition` = ifelse(feedback == 1, "Feedback", "No feedback"), .before = 1) %>% 
+  select(-feedback) %>% 
+  rename_all(~(str_remove(., "_deter"))) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI") %>% 
+  as.data.frame()
+
+# Deterioration rates for the sample included
+# deter_rates_cut <- map_dfc(c("Depression34", "Anxiety34", "Social_Anxiety34", "Academics34",
+#                 "Eating34", "Hostility34", "Alcohol34", "DI"), get_deter_rates) %>% 
+#   mutate_all(scales::percent, accuracy = .1) %>% 
+#   mutate(feedback = c(0, 1), .before = 1)
+```
+First, client deterioration on each subscale, or reliable worsening, was examined as an outcome. The direction of the effect on this outcome across all subscales was toward reduced deterioration in the feedback condition; however, the effect of feedback only significantly improved model fit on the DI ($\chi$^2^(1) = `r DI_lrt[2, "Chisq"]`, *p* = `r round(DI_lrt[2, "Pr(>Chisq)"],3)`). The effect was small, however, (`r pull_deter_stats("DI", "feedback")`), and the R^2^ was less than 1%, indicating that this was not a strong effect. ADD ODDS RATIO INTERPRETATION. Table 3 shows the effect of feedback on all subscales, and deterioration rates for each subscale by feedback condition are shown in Table 4.  
+
+Addressing research question two, feedback had more of an impact on reducing deterioration on a general index of distress than on any of the domain specific subscales, although the effect was small. Addressing research question three, the random effect of feedback did not significantly improve model fit on any of the subscales, and for several subscales, the inclusion of a random effect of feedback produced boundary estimates for the parameters and near singular fit warnings. This indicates that the effect of feedback on deterioration did not differ by center, and random effects of feedback were not included in subsequent models.   
+
+```{r deter-moderators}
+deter_params_mods <- suppressWarnings(map_df(deter_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale")) %>%
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(subscale, term, estimate, SE) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>%
+  slice(1:14) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+  mutate(term = str_replace(term, ":", "*")) %>% 
+  mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           `Client baseline` = "outcome_first_centered",
+                           `Center baseline` = "outcome_first_center",
+                           `CCAPS frequency` = "ccaps_freq",
+                           `Appointment N` = "appt_n",
+                           Hospitalization = "hospitalization",
+                           `Feedback * Client baseline` = "feedback*outcome_first_centered",
+                           `Feedback * Center baseline` = "feedback*outcome_first_center",
+                           `Feedback * CCAPS frequency` = "feedback*ccaps_freq",
+                           `Feedback * Appointment N` = "feedback*appt_n",
+                           `Feedback * Hospitalization` = "feedback*hospitalization",
+                           `Random Intercept` = "sd__(Intercept)")) %>% 
+  rbind(deter_Ns) %>% 
+  mutate(term = str_replace(term, "\\.", " ")) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+```
+
+Finally, interactions were tested between feedback condition and each of the moderator variables. None of the moderators produced a significant effect. Looking at main effects, client baseline was related to deterioration on all subscales except Eating Concerns and Alcohol Use, such that higher client baseline scores decreased the odds of deterioration. Average center baseline did not have a main effect beyond the effect of client baseline. CCAPS frequency was negatively related to deterioration only on the Hostility and Alcohol Use subscales. Number of appointments was positively related to deterioration on all subscales except Alcohol Use. Hospitalizations were positively related to deterioration on all subscales. Coefficients for moderators and main effects are shown in Table 5.  
+
+## Pre to Post Change 
+```{r change-ns}
+change_Ns <- map_df(change_models[1:8], function(x) {data.frame(Centers = x[["moderators"]][["dims"]][["ngrps"]][1], Clients = x[["moderators"]][["dims"]][["N"]])}, .id = "subscale") %>% 
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  mutate(term = c("Center N", "Client N"), .before = 1)
+```
+
+```{r change-lrts}
+change_LRTs1 <- map_df(change_models[1:8], function(x) {anova(x[["null"]], x[["feedback"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# Feedback improved model fit for anxiety, social anxiety, and eating
+
+change_LRTs2 <- map_df(change_models[1:8], function(x) {anova(x[["feedback"]], x[["feedback_random"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# Random effect of feedback for Depression, Anxiety, Social Anxiety, Alcohol, and DI
+```
+
+```{r change-feedback-table}
+change_params_feedback <- suppressWarnings(map_df(change_models[1:8], function(x) {broom.mixed::tidy(x[["feedback_random"]])}, .id = "subscale")) %>%
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(-c(effect, group, statistic, df, `p.value`, `std.error`)) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+    mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           Intercept = "sd_(Intercept)",
+                           Correlation = "cor_feedback.(Intercept)",
+                           Feedback = "sd_feedback",
+                           Residual = "sd_Observation")) %>% 
+  rbind(change_Ns) 
+
+change_random <- rbind(map_df(change_models[1:8], function(x) {as.numeric(VarCorr(x[["feedback_random"]])[1])/(as.numeric(VarCorr(x[["feedback_random"]])[1])+ as.numeric(VarCorr(x[["feedback_random"]])[2]) + as.numeric(VarCorr(x[["feedback_random"]])[3]))}, .id = "subscale"),
+                       map_df(change_models[1:8], function(x) {as.numeric(VarCorr(x[["feedback_random"]])[2])/(as.numeric(VarCorr(x[["feedback_random"]])[1])+ as.numeric(VarCorr(x[["feedback_random"]])[2]) + as.numeric(VarCorr(x[["feedback_random"]])[3]))}, .id = "subscale")) %>% 
+  mutate(across(everything(), scales::percent, accuracy = .1)) %>% 
+  mutate(term = c("Center intercept variance", "Center feedback variance"), .before = 1)
+
+change_params_feedback <- rbind(change_params_feedback, change_random) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+```
+
+Next, pre to post treatment change on each subscale was examined as an outcome, with positive change indicating improvement. The addition of feedback condition improved model fit on Generalized Anxiety (`r change_lrts("Anxiety34")`), Social Anxiety (`r change_lrts("Social_Anxiety34")`), and Eating Concerns (`r change_lrts("Eating34")`); however, the coefficients themselves were not significant, and the standardized coefficients indicated a very small effect, in the direction of more change in the feedback condition. R^2^ values associated with the effect were also less than 1%, indicating there was no significant or meaningful effect of feedback on the amount of CCAPS change clients experienced. Table 6 shows the effect of feedback on each subscale, and Figure 2 shows the predicted amount of CCAPS improvement on each subscale for the no feedback and feedback conditions. Given the lack of meaningful effects on any subscale, there is no evidence that the effect of feedback differed by domain.  
+
+Addressing research question three, a center level random effect of feedback was tested. The random effect of feedback significantly improved model fit on models of Depression (`r change_lrts_rand("Depression34")`), Generalized Anxiety (`r change_lrts_rand("Anxiety34")`), Social Anxiety (`r change_lrts_rand("Social_Anxiety34")`), Alcohol Use (`r change_lrts_rand("Alcohol34")`), and the DI (`r change_lrts_rand("DI")`), and random effects of feedback were retained for subsequent models of pre to post change on only those subscales. These random effects indicate the presence of center variation around the overall effect of feedback; however this effect was small, accounting for less than 1% of the variance, while other differences between centers accounted for 1.2% to 3.1% of the variance on those same subscales. Table 6 shows the random effects variance for all subscales. The small random effects variance components indicate that while feedback may have been more effective at some centers than others, it was not a large effect. Understanding differences in how CCAPS feedback is utilized within each center may help explain these small differences. Although outside the scope of this study, the discussion will explore possible center policies and characteristics that may be associated with positive feedback effects.  
+
+```{r change-moderators}
+change_params_fixed_raw <- suppressWarnings(map_df(change_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale"))
+
+change_params_fixed <- mutate(change_params_fixed_raw, estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  select(-c(effect, group, statistic, df, `p.value`, `std.error`)) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-SE) %>% 
+  pivot_wider(names_from = subscale, values_from = estimate) %>%
+  slice(1:14) %>% 
+  mutate_all(stringr::str_remove, " \\(NA\\)") %>% 
+  mutate(term = str_replace(term, ":", "*")) %>% 
+  mutate(term = fct_recode(term, Intercept = "(Intercept)",
+                           Feedback = "feedback",
+                           `Off track` = "outcome_alert",
+                           `Client baseline` = "outcome_first_centered",
+                           `Center baseline` = "outcome_first_center",
+                           `CCAPS frequency` = "ccaps_freq",
+                           `Appointment N` = "appt_n",
+                           Hospitalization = "hospitalization",
+                           `Feedback * Off track` = "feedback*outcome_alert",
+                           `Feedback * Client baseline` = "feedback*outcome_first_centered",
+                           `Feedback * Center baseline` = "feedback*outcome_first_center",
+                           `Feedback * CCAPS frequency` = "feedback*ccaps_freq",
+                           `Feedback * Appointment N` = "feedback*appt_n",
+                           `Feedback * Hospitalization` = "feedback*hospitalization"))
+
+change_params_random <- suppressWarnings(map_df(change_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale")) %>% 
+  select(-c(effect, group, statistic, df, `p.value`, `std.error`)) %>%
+  pivot_wider(names_from = subscale, values_from = estimate) %>%
+  slice(15, 17, 18) %>% 
+  mutate(term = c("Intercept", "Feedback", "Residual")) %>% 
+  mutate(across(is.numeric, function(x) x^2), across(is.numeric, round, 2))
+
+change_params_mods <- plyr::rbind.fill(change_params_fixed, change_params_random)
+
+change_params_mods <- rbind(change_params_mods, change_Ns) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+```
+
+Finally, five moderator variables were added to the model to address research question four. Client baseline CCAPS score was a significant moderator on four subscales, although the direction of the effect was not consistent. For Generalized Anxiety (`r pull_change_mods("Anxiety34", "feedback:outcome_first_centered")`) and the Distress Index (`r pull_change_mods("DI", "feedback:outcome_first_centered")`), as baseline CCAPS increased, feedback became less effective. On the other hand, for Hostility (`r pull_change_mods("Hostility34", "feedback:outcome_first_centered")`) and Alcohol Use (`r pull_change_mods("Alcohol34", "feedback:outcome_first_centered")`), as baseline CCAPS increased, feedback became more effective. The frequency with which the CCAPS was administered was a significant moderator only for Depression (`r pull_change_mods("Depression34", "feedback:ccaps_freq")`), such that as the CCAPS was administered more frequently, feedback became more effective. Similarly, the total number of appointments was a significant moderator for Social Anxiety (`r pull_change_mods("Social_Anxiety34", "feedback:appt_n")`), such that as a client had more appointments, feedback became more effective. While significant, these moderators had a small effect, with standardized coefficients of .01 and R^2^ values less than 1%. A client going off track or having hospitalizations was not a significant moderator on any of the subscales, nor was the center baseline CCAPS score.  
+
+There was a strong main effect for going off track on all subscales, and the lack of significant interaction indicates that this effect did not differ by feedback status. This indicates that even in the feedback condition where clients who went off track received an off track alert, receiving this alert did not result in outcomes similar to clients who did not go off track. Other main effects indicated that, consistent with prior research (CITE DEVER'S PAPER), clients and centers with higher baseline CCAPS achieved more positive change. Diverging from models of deterioration, there were also significant main effects on every subscale for CCAPS frequency and number of appointments, such that independent of feedback condition, clients with more frequent CCAPS administrations and more appointments achieved more change. Consistent with models of deterioration, clients with prior hospitalizations achieved less change on most subscales. The effects for all moderators and main effects are presented in Table 7.  
+
+## Rate of Change
+```{r roc-shape}
+shape_anovas <- map_df(change_shape[1:8], function(x) anova(x[["loglinear"]], x[["inverse"]], x[["quad"]])) %>% 
+  rownames_to_column("model") %>% 
+  separate(col = model, into = c("subscale", "model"), sep = "\\.\\.\\.", extra = "merge", fill = "left") %>% 
+  mutate(model = stringr::str_remove(model, 'x\\[\\[\\"'),
+         model = stringr::str_remove(model, '"\\]\\]'))
+
+best_shape <- shape_anovas %>% group_by(subscale) %>% 
+  filter(BIC == min(BIC)) %>% 
+  select(subscale, model, BIC) %>% 
+  mutate(model = fct_recode(model, "negative reciprocal" = "inverse",
+                            "logarithmic" = "loglinear"))
+
+# shape_anovas %>% group_by(subscale) %>% 
+#   filter(AIC == min(AIC)) %>% 
+#   select(subscale, model, AIC)
+# 
+# shape_anovas %>% group_by(subscale) %>% 
+#   filter(logLik == max(logLik)) %>% 
+#   select(subscale, model, logLik)
+```
+
+```{r roc-lrts}
+roc_LRTs1 <- map_df(roc_models[1:8], function(x) {anova(x[["null"]], x[["feedback"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+
+# Depression, Anxiety, Social, eating, DI significant
+
+roc_LRTs2 <- map_df(roc_models[1:8], function(x) {anova(x[["feedback"]], x[["feedback_random"]])[2,8:9]}, .id = "subscale")  %>%
+  mutate(LRT = round(`L.Ratio`, 2),
+         LRT = case_when(`p-value` < .001 ~ paste0(LRT, "**"),
+                         `p-value` < .01 ~ paste0(LRT, "*"),
+                         TRUE ~ as.character(LRT, "**"))) %>%
+  select(subscale, LRT) %>%
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("parameter")
+# Random effect significant for depression, anxiety, social, hostility, alcohol, and DI
+```
+
+```{r roc-feedback}
+roc_params_feedback_fixed <- suppressWarnings(map_df(roc_models[1:8], function(x) {broom.mixed::tidy(x[["feedback_random"]])}, .id = "subscale")) %>%
+  mutate(term = str_remove(term, "log_"),
+         term = str_remove(term, "inv_")) %>% 
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-c(effect, group, statistic, `p.value`, `std.error`, SE, df)) %>%
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate(term = fct_recode(term, "Slope" = "appt_seq", "Slope * Feedback" = "appt_seq:feedback"))
+
+# Depression, Anxiety, Social, DI significant
+
+roc_params_feedback_fixed <- select(best_shape, -BIC) %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as_tibble() %>% 
+  mutate(term = "Transformation", .before = 1) %>% 
+  rbind(roc_params_feedback_fixed)
+
+roc_feedback_random <- suppressWarnings(map_df(roc_models[1:8], function(x) {as.data.frame(t(VarCorr(x[["feedback_random"]])[c(2,3,5,6),1]))}, .id = "subscale")) %>% 
+  pivot_longer(cols = -subscale, names_to = "term", values_to = "values") %>% 
+  mutate(term = rep(c("Center Slope", "Slope * Feedback", "Client Slope", "Residual", "Center Slope", "Slope * Feedback", "Client Slope"), 8)) %>% 
+  filter(!is.na(values)) %>% 
+  mutate(values = round(as.numeric(as.character(values)), 2)) %>% 
+  pivot_wider(names_from = subscale, values_from = values)
+
+roc_Ns <- map_df(roc_models[1:8], function(x) {data.frame(Centers = x[["null"]][["dims"]][["ngrps"]][1], Clients = x[["null"]][["dims"]][["N"]])}, .id = "subscale") %>% 
+  as_tibble() %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as.data.frame()
+
+roc_random <- rbind(map_df(roc_models[1:8], function(x) {as.numeric(VarCorr(x[["feedback_random"]])[2])/(as.numeric(VarCorr(x[["feedback_random"]])[2])+ as.numeric(VarCorr(x[["feedback_random"]])[3]) + as.numeric(VarCorr(x[["feedback_random"]])[5]))}, .id = "subscale"),
+                       map_df(roc_models[1:8], function(x) {as.numeric(VarCorr(x[["feedback_random"]])[3])/(as.numeric(VarCorr(x[["feedback_random"]])[2])+ as.numeric(VarCorr(x[["feedback_random"]])[3]) + as.numeric(VarCorr(x[["feedback_random"]])[5]))}, .id = "subscale"),
+                    map_df(roc_models[1:8], function(x) {as.numeric(VarCorr(x[["feedback_random"]])[5])/(as.numeric(VarCorr(x[["feedback_random"]])[2])+ as.numeric(VarCorr(x[["feedback_random"]])[3]) + as.numeric(VarCorr(x[["feedback_random"]])[5]))}, .id = "subscale")) %>% 
+  mutate(across(everything(), scales::percent, accuracy = .1)) %>% 
+  mutate(term = c("Center slope variance", "Feedback slope variance", "Client slope variance"), .before = 1)
+
+roc_params_feedback <- rbind(roc_params_feedback_fixed, roc_feedback_random, roc_random) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+```
+
+Finally, the rate at which CCAPS distressed changed during treatment was examined as an outcome. Prior to examining the predictors of interest, different transformations of session number were tested to determine which shape of change provided the best fit for the data. A log transformation provided the best fit for Depression, Anxiety, Social Anxiety, and the DI, while a negative reciprocal transformation provided the best fit for Academics, Eating, Hostility, and Alcohol. The resulting shapes of change can be seen in Figure 3. Those transformations were used for subsequent analyses.  
+
+The effect of feedback significantly improved model fit on Depression (`r roc_lrts("Depression34")`), Generalized Anxiety (`r roc_lrts("Anxiety34")`), Social Anxiety (`r roc_lrts("Social_Anxiety34")`), Eating Concerns (`r roc_lrts("Eating34")`), and the DI (`r roc_lrts("DI")`). Although coefficients for the effect of feedback were significant on some subscales, the standardized coefficients were quite small ($\beta\ = -.01), indicating that clients in the feedback condition experienced about .01 standardized unit of CCAPS change more per standardized session than clients in the no feedback condition. Table 8 shows the effect of feedback on each subscale, and Figure 3 shows the predicted trajectories the no feedback and feedback conditions. Addressing research question two, the feedback condition had a stronger effect on Depression, Generalized Anxiety, Social Anxiety, and the Distress Index than on the other subscales. These subscales, which all used a log transformation, also exhibited somewhat steeper recovery trajectories, which may have allowed the trajectories of the two feedback conditions to diverge more.  
+
+Random effects of feedback improved model fit on Depression (`r roc_lrts_rand("Depression34")`), Generalized Anxiety (`r roc_lrts_rand("Anxiety34")`), Social Anxiety (`r roc_lrts_rand("Social_Anxiety34")`), Hostility (`r roc_lrts_rand("Hostility34")`), Alcohol Use (`r roc_lrts_rand("Alcohol34")`), and the DI (`r roc_lrts_rand("DI")`). Although random effects of feedback were retained for these subscales in subsequent models, differences between centers in the effect of feedback accounted for less than 1% of the variance on each subscale, while other center effects accounted for 1.2 to 4.6% of the variance in slope, and differences between clients accounted for 95.0 to 98.7% of the variance.  
+
+```{r roc-moderators}
+roc_params_mods_fixed_raw <- suppressWarnings(map_df(roc_models[1:8], function(x) {broom.mixed::tidy(x[["moderators"]])}, .id = "subscale"))
+
+roc_params_mods_fixed <- mutate(roc_params_mods_fixed_raw, term = str_remove(term, "log_"),
+         term = str_remove(term, "inv_")) %>% 
+  mutate(estimate = round(estimate, 2)) %>%
+  mutate(estimate = ifelse(estimate == "0", "0.00", estimate)) %>%
+  mutate(estimate = case_when(`p.value` < .001 ~ paste0(estimate, "**"),
+                              `p.value` < .01 ~ paste0(estimate, "*"),
+                              TRUE ~ as.character(estimate)),
+         estimate = ifelse(estimate == "0", "0.00", estimate),
+         SE = as.character(round(`std.error`, 2))) %>%
+  mutate(estimate = glue::glue("{estimate} ({SE})")) %>% 
+  select(-c(effect, group, statistic, `p.value`, `std.error`, SE, df)) %>%
+  pivot_wider(names_from = subscale, values_from = estimate) %>% 
+  mutate(term = str_replace(term, "appt_seq", "Slope"),
+         term = str_replace_all(term, ":", " * "),
+         term = str_replace(term, "feedback", "Feedback"),
+         term = str_replace(term, "outcome_first_centered", "Client baseline"),
+         term = str_replace(term, "outcome_first_center", "Center baseline"),
+         term = str_replace(term, "outcome_alert", "Off track"),
+         term = str_replace(term, "ccaps_freq", "CCAPS Frequency"),
+         term = str_replace(term, "appt_n", "Appointment N"),
+         term = str_replace(term, "hospitalization", "Hospitalization"))
+
+roc_params_mods_fixed <- select(best_shape, -BIC) %>% 
+  column_to_rownames("subscale") %>% 
+  t() %>% 
+  as_tibble() %>% 
+  mutate(term = "Transformation", .before = 1) %>% 
+  rbind(roc_params_mods_fixed) %>% 
+  rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+
+# TODO: Fix this random effect syntax to account for some subscales missing this info
+# roc_mods_random <- suppressWarnings(map_df(roc_models[1:8], function(x) {as.data.frame(t(VarCorr(x[["moderators"]])[c(2,3,5,6),1]))}, .id = "subscale")) %>% 
+#   pivot_longer(cols = -subscale, names_to = "term", values_to = "values") %>% 
+#   filter(!is.na(values)) %>% 
+#   mutate(term = rep(c("Center Slope", "Center Slope * Feedback", "Client Slope", "Residual"), 8)) %>% 
+#   mutate(values = round(as.numeric(as.character(values)), 2)) %>% 
+#   pivot_wider(names_from = subscale, values_from = values) %>% 
+#   rename("Depression" = "Depression34", "Generalized Anxiety" = "Anxiety34", "Social Anxiety" = "Social_Anxiety34", "Academic Distress" = "Academics34", "Eating Concerns" = "Eating34", "Hostility" = "Hostility34", "Alcohol Use" = "Alcohol34", "Distress Index" = "DI")
+```
+
+Finally, moderator variables were tested as interactions between slope and feedback. The effect of client baseline was significant for Hostility (`r pull_roc_mods("Hostility34", "inv_appt_seq:feedback:outcome_first_centered")`) and Alcohol use (`r pull_roc_mods("Alcohol34", "inv_appt_seq:feedback:outcome_first_centered")`), such that as client baseline increased, the effect of feedback became stronger, resulting in steeper slopes. Additionally, there was a significant moderating effect of CCAPS frequency for Depression (`r pull_roc_mods("Depression34", "log_appt_seq:feedback:ccaps_freq")`) and the DI (`r pull_roc_mods("DI", "log_appt_seq:feedback:ccaps_freq")`) such that as CCAPS frequency increased, the effect of feedback became stronger. Although significant, the coefficients had small standardized effects ($\beta$ = .01), indicating that for clients in the feedback condition a one standardized unit increase in the moderator was associated with an additional .01 standardized unit of CCAPS change per standardized session for clients in the feedback condition.
+
+Looking at main effects, as client baseline increased, clients experienced more rapid decreases in symptoms across all subscales. Center baseline had an effect in the same direction, although the effect was smaller. Similar to analyses of pre to post change, clients who went off track during treatment exhibited slower recovery trajectories. As CCAPS frequency increased, clients experienced more rapid decreases in symptoms; conversely, as total number of appointments increased, clients experienced slower change, although both effects were small. Finally, hospitalization had a small effect such that clients with prior hospitalizations experienced slower change. Coefficients for all moderators and main effects are presented in Table 9.  
+
+```{r roc-r2, eval=FALSE, include=FALSE}
+roc_R2 <- suppressWarnings(map_df(roc_models[1:8], function(x) {r2glmm::r2beta(x[["feedback_random"]], method = "nsj")}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq)
+
+main_effects <- roc_models[["Depression34"]][["feedback_random"]]
+moderators <- roc_models[["Depression34"]][["moderators"]]
+
+# save(main_effects, moderators, file = "results/rebecca-dissertation-models.rda")
+
+global_r2 <- MuMIn::r.squaredGLMM(dep_feedback)
+r2 <- r2glmm::r2beta(main_effects, method = "sgv")
+r2 <- r2glmm::r2beta(main_effects, method = "nsj")
+
+roc_R2 <- suppressWarnings(map_df(roc_models[1:8], function(x) {r2glmm::r2beta(x[["moderators"]], method = "nsj", method = "nsj")}, .id = "subscale")) %>%
+  select(subscale, Effect, Rsq) %>%
+  mutate(Rsq = round(Rsq, 4)) %>%
+  pivot_wider(names_from = subscale, values_from = Rsq)
+```

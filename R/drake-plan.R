@@ -1,6 +1,8 @@
 source("R/packages.R")
 source("R/funs_cleaning.R")
 source("R/funs_analysis.R")
+source("R/funs_descriptives.R")
+source("R/funs_results.R")
 
 plan <- drake::drake_plan(
   # Data cleaning-----------------------------------------------------------------------------
@@ -17,15 +19,19 @@ plan <- drake::drake_plan(
   updated_centers = get_updated_centers(ccaps_update_dates),
   included_centers = intersect(unique(combined_TI_data$CcmhID), updated_centers$CcmhID),
   precleaned_data = create_precleaned_data(combined_TI_data, included_centers),
+  data_courses = CCMHr::create_courses(precleaned_data, firstOnly = T),
   moderators = create_moderators(precleaned_data),
-  roc_data_intermediate = clean_roc(precleaned_data, min_ccaps = 3) %>%
-    left_join(moderators) %>%
+  roc_data_intermediate = clean_roc(data_courses, min_ccaps = 3) %>%
+    left_join(select(moderators, UniqueClientID, hospitalization)) %>%
     filter(!is.na(hospitalization)),
   change_data = clean_change(roc_data_intermediate) %>%
-    left_join(moderators) %>%
+    left_join(select(moderators, UniqueClientID, hospitalization)) %>%
     filter(!is.na(hospitalization)),
   deter_data = clean_deterioration(change_data),
-  roc_data = anchor_roc(roc_data_intermediate),
+  # roc_data = anchor_roc(roc_data_intermediate),
+  flow_chart = build_flow_chart(data_courses, moderators),
+  alphas = calculate_alphas(data_courses, change_data),
+  alert_data = session_alerts(roc_data_intermediate),
 
   # Models----------------------------------------------------------------------------------
   subscales = c("Depression34", "Anxiety34", "Social_Anxiety34", "Academics34",
@@ -34,18 +40,20 @@ plan <- drake::drake_plan(
     set_names(subscales),
   deter_models = purrr::map(subscales, deterioration_analyses, data = deter_data) %>%
     set_names(subscales),
-  change_shape = purrr::map(subscales, test_change_shape, data = roc_data) %>%
+  # deter_omnibus_model = deterioration_omnibus(data = deter_data),
+  change_shape = purrr::map(subscales, test_change_shape, data = roc_data_intermediate) %>%
     set_names(subscales),
-  roc_models = purrr::map(subscales, roc_analyses, data = roc_data) %>%
-    set_names(subscales)
+  shape_anovas = map_df(change_shape[1:8], function(x) anova(x[["loglinear"]], x[["inverse"]], x[["quad"]])),
+  roc_models = purrr::map(subscales, roc_analyses, data = roc_data_intermediate) %>%
+    set_names(subscales),
 
+  # Results---------------------------------------------------------------------------------
+  # deter_r2_feedback = create_deter_r2_feedback(deter_models),
+  # deter_r2_mods = create_deter_r2_mods(deter_models),
+  # change_r2_feedback = create_change_r2_feedback(change_models),
+  # change_R2_mods = create_change_R2_mods(change_models),
 
   # # Reports
-  # descriptives = rmarkdown::render(
-  #   knitr_in("descriptives.rmd"),
-  #   output_file = file_out("descriptives.docx"),
-  #   quiet = TRUE
-  # ),
   # results = rmarkdown::render(
   #   knitr_in("results.rmd"),
   #   output_file = file_out("results.docx"),

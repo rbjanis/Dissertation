@@ -62,10 +62,9 @@ create_precleaned_data <- function(combined_TI_data, included_centers) {
 # Cleaning data for analyses ----------------------------------------------
 
 # Clean rate of change
-clean_roc <- function(precleaned_data, min_ccaps) {
+clean_roc <- function(data_courses, min_ccaps) {
   # First course of treatment
-  data <- CCMHr::create_courses(precleaned_data, firstOnly = T) %>%
-    mutate(feedback = ifelse(Date <= "2015-07-01", 0, 1))
+  data <- data_courses
 
   usethis::ui_info(glue::glue("Clients before cleaning: {n_distinct(data$UniqueClientID)}"))
   usethis::ui_info(glue::glue("Centers before cleaning: {n_distinct(data$CcmhID)}"))
@@ -218,16 +217,23 @@ clean_roc <- function(precleaned_data, min_ccaps) {
   cleaned_data <- full_join(scores_wide, alert_wide) %>%
     mutate(inv_appt_seq = (-1/(appt_seq+1))+1,
            log_appt_seq = log(1+appt_seq)) %>%
-    mutate(feedback = ifelse(Date <= "2015-07-01", 0, 1))
+    mutate(feedback = ifelse(Date <= "2015-07-01", 0, 1)) %>%
+    group_by(UniqueClientID) %>%
+    mutate(appt_N = n(),
+           CCAPS_n = sum(!is.na(DI)),
+           ccaps_frequency = CCAPS_n/appt_N,
+           appt_n = appt_N,
+           ccaps_freq = ccaps_frequency,
+           across(Depression34:DI, first, .names = "{col}_first"))
 
-  oneline <- group_by(cleaned_data, UniqueClientID) %>%
-    summarize(appt_N = n(),
-              CCAPS_n = sum(!is.na(DI))) %>%
-    mutate(ccaps_freq = CCAPS_n/appt_N,
-           appt_n = scale(appt_N),
-           ccaps_freq = scale(ccaps_freq))
-
-  cleaned_data <- left_join(cleaned_data, oneline)
+  # oneline <- group_by(cleaned_data, UniqueClientID) %>%
+  #   summarize(appt_N = n(),
+  #             CCAPS_n = sum(!is.na(DI))) %>%
+  #   mutate(ccaps_frequency = CCAPS_n/appt_N,
+  #          appt_n = scale(appt_N),
+  #          ccaps_freq = scale(ccaps_frequency))
+  #
+  # cleaned_data <- left_join(cleaned_data, oneline)
 
   # Alert rates by subscale
   # cleaned_data %>% group_by(UniqueClientID) %>%
@@ -241,48 +247,45 @@ clean_roc <- function(precleaned_data, min_ccaps) {
   #   summarize_at(vars(contains("alert")), list(mean), na.rm = T) %>%
   #   View()
 
-  first_ccaps <- group_by(cleaned_data, UniqueClientID, CcmhID) %>%
-    summarize(across(Depression34:DI, first, .names = "{col}_first")) %>%
-    ungroup() %>%
-    CCMHr::ccaps34_cuts(data = ., version = "2018", first = T) %>%
-    mutate(across(Depression34_first:DI_first, scale, .names = "{col}_scaled")) %>%
-    # mutate(Depression34_first = ifelse(Depression34_low_cut == 0, NA, Depression34_first),
-    #        Anxiety34_first = ifelse(Anxiety34_low_cut == 0, NA, Anxiety34_first),
-    #        Social_Anxiety34_first = ifelse(Social_Anxiety34_low_cut == 0, NA, Social_Anxiety34_first),
-    #        Academics34_first = ifelse(Academics34_low_cut == 0, NA, Academics34_first),
-    #        Eating34_first = ifelse(Eating34_low_cut == 0, NA, Eating34_first),
-    #        Hostility34_first = ifelse(Hostility34_low_cut == 0, NA, Hostility34_first),
-    #        Alcohol34_first = ifelse(Alcohol34_low_cut == 0, NA, Alcohol34_first),
-    #        DI_first = ifelse(DI_low_cut == 0, NA, DI_first)) %>%
-    group_by(CcmhID) %>%
-    mutate(across(Depression34_first_scaled:DI_first_scaled, function(x) mean(x, na.rm = T), .names = "{col}_center")) %>%
-    ungroup() %>%
-    mutate(Depression34_first_centered = Depression34_first_scaled - Depression34_first_scaled_center,
-           Anxiety34_first_centered = Anxiety34_first_scaled - Anxiety34_first_scaled_center,
-           Social_Anxiety34_first_centered = Social_Anxiety34_first_scaled - Social_Anxiety34_first_scaled_center,
-           Academics34_first_centered = Academics34_first_scaled - Academics34_first_scaled_center,
-           Eating34_first_centered = Eating34_first_scaled - Eating34_first_scaled_center,
-           Hostility34_first_centered = Hostility34_first_scaled - Hostility34_first_scaled_center,
-           Alcohol34_first_centered = Alcohol34_first_scaled - Alcohol34_first_scaled_center,
-           DI_first_centered = DI_first_scaled - DI_first_scaled_center) %>%
-    select(-c(Depression34_first_scaled:DI_first_scaled))
+  # center_ccaps <- group_by(cleaned_data, UniqueClientID, CcmhID) %>%
+  #   summarize(across(Depression34:DI, first, .names = "{col}_first")) %>%
+  #   group_by(CcmhID) %>%
+  #   summarize(across(Depression34_first:DI_first, function(x) mean(x, na.rm = T), .names = "{col}_center")) %>%
+  #   mutate(across(Depression34_first_center:DI_first_center, scale, .names = "{col}_scaled"))
 
-  cleaned_data <- left_join(cleaned_data, first_ccaps)
-  names(cleaned_data) <- stringr::str_remove(names(cleaned_data), "_scaled")
+  # first_ccaps <- group_by(cleaned_data, UniqueClientID, CcmhID) %>%
+  #   summarize(across(Depression34:DI, first, .names = "{col}_first")) %>%
+  #   ungroup() %>%
+  #   left_join(center_ccaps) %>%
+  #   mutate(Depression34_first_centered = Depression34_first - Depression34_first_center,
+  #          Anxiety34_first_centered = Anxiety34_first - Anxiety34_first_center,
+  #          Social_Anxiety34_first_centered = Social_Anxiety34_first - Social_Anxiety34_first_center,
+  #          Academics34_first_centered = Academics34_first - Academics34_first_center,
+  #          Eating34_first_centered = Eating34_first - Eating34_first_center,
+  #          Hostility34_first_centered = Hostility34_first - Hostility34_first_center,
+  #          Alcohol34_first_centered = Alcohol34_first - Alcohol34_first_center,
+  #          DI_first_centered = DI_first - DI_first_center) %>%
+  #   mutate(across(Depression34_first_centered:DI_first_centered, scale)) %>%
+  #   select(-c(Depression34_first_center:DI_first_center))
+  #
+  # names(first_ccaps) <- str_remove(names(first_ccaps), "_scaled")
+  #
+  # cleaned_data <- left_join(cleaned_data, first_ccaps)
 
   cleaned_data
 }
 
 # Anchor ROC scores
 anchor_roc <- function(roc_data_intermediate) {
-  roc_data_intermediate <- mutate(roc_data_intermediate, Depression34 = Depression34 - Depression34_first,
-                     Anxiety34 = Anxiety34 - Anxiety34_first,
-                     Social_Anxiety34 = Social_Anxiety34 - Social_Anxiety34_first,
-                     Academics34 = Academics34 - Academics34_first,
-                     Eating34 = Eating34 - Eating34_first,
-                     Hostility34 = Hostility34 - Hostility34_first,
-                     Alcohol34 = Alcohol34 - Alcohol34_first,
-                     DI = DI - DI_first)
+  roc_data_intermediate <- ungroup(roc_data_intermediate) %>%
+    mutate(Depression34 = Depression34 - Depression34_first,
+           Anxiety34 = Anxiety34 - Anxiety34_first,
+           Social_Anxiety34 = Social_Anxiety34 - Social_Anxiety34_first,
+           Academics34 = Academics34 - Academics34_first,
+           Eating34 = Eating34 - Eating34_first,
+           Hostility34 = Hostility34 - Hostility34_first,
+           Alcohol34 = Alcohol34 - Alcohol34_first,
+           DI = DI - DI_first)
 
   roc_data_intermediate
 }
@@ -292,7 +295,7 @@ clean_change <- function(roc_data_intermediate) {
   # First and last CCAPS
   change_data <- roc_data_intermediate %>%
     group_by(UniqueClientID, CcmhID) %>%
-    summarize(across(Depression34:DI, first_present, .names = "{col}_first"), across(Depression34:DI, last_present, .names = "{col}_last"), across(Depression34_first_centered:DI_first_centered, first), across(Depression34_first_center:DI_first_center, first), across(Depression34_low_cut:DI_low_cut, first)) %>%
+    summarize(across(Depression34:DI, first_present, .names = "{col}_first"), across(Depression34:DI, last_present, .names = "{col}_last")) %>%
     # Positive change is improvement
     mutate(Depression34_change = Depression34_first - Depression34_last,
            Anxiety34_change = Anxiety34_first - Anxiety34_last,
@@ -374,53 +377,10 @@ create_moderators <- function(precleaned_data) {
     group_by(UniqueClientID) %>%
     arrange(UniqueClientID, Date) %>%
     slice(1) %>%
-    select(UniqueClientID, SDS_64) %>%
     ungroup() %>%
+    select(UniqueClientID, contains("SDS_"), ClientAge) %>%
     mutate(hospitalization = ifelse(SDS_64 > 1, 1, 0))
 
 }
 
-# Session by session alert data
-session_alerts <- function(data = roc_data_intermediate) {
 
-  alert_boundaries <- CCMHr::alerts %>%
-    rename(alert_score = score)
-
-  cleaned_data <- select(data, UniqueClientID, appt_seq, Depression34:DI) %>%
-    group_by(UniqueClientID) %>%
-    mutate(across(c(Depression34:DI), first, .names = "{col}_first"))
-
-  # Bin first CCAPS
-  cleaned_data <- create_CCAPS_bins(cleaned_data)
-
-  # Anxiety 23, 24, 25
-  # Social Anxiety 19, 20, 21
-  # Academics 16, 17
-  # Eating 11, 12, 13
-
-  scores_long <- select(cleaned_data, UniqueClientID:DI) %>%
-    pivot_longer(cols = Depression34:DI, names_to = "subscale", values_to = "score") %>%
-    ungroup()
-  combined_long <- ungroup(cleaned_data) %>%
-    select(contains("bin")) %>%
-    pivot_longer(cols = contains("bin"), names_to = "bin_subscale", values_to = "bin") %>%
-    cbind(scores_long, .) %>%
-    filter(subscale != "Anxiety34" | bin != 23) %>%
-    filter(subscale != "Anxiety34" | bin != 24) %>%
-    filter(subscale != "Anxiety34" | bin != 25) %>%
-    filter(subscale != "Social_Anxiety34" | bin != 19) %>%
-    filter(subscale != "Social_Anxiety34" | bin != 20) %>%
-    filter(subscale != "Social_Anxiety34" | bin != 21) %>%
-    filter(subscale != "Academics34" | bin != 16) %>%
-    filter(subscale != "Academics34" | bin != 17) %>%
-    filter(subscale != "Eating34" | bin != 11) %>%
-    filter(subscale != "Eating34" | bin != 12) %>%
-    filter(subscale != "Eating34" | bin != 13)
-
-  combined_alerts <- left_join(combined_long, alert_boundaries, by = c("subscale" = "subscale", "appt_seq" = "session", "bin" = "bin")) %>%
-    mutate(alert = ifelse(score > alert_score, 1, 0)) %>%
-    filter(!is.na(alert)) %>%
-    mutate(appt_seq = appt_seq + 1)
-
-  combined_alerts
-}

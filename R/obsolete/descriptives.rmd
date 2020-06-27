@@ -1,0 +1,156 @@
+---
+output: word_document
+---
+
+```{r setup-descriptives, include=FALSE}
+source(here::here("R/packages.R"))
+source(here::here("R/funs_cleaning.R"))
+source(here::here("R/funs_descriptives.R"))
+source(here::here("R/funs_results.R"))
+
+roc_data <- readd(roc_data)
+change_data <- readd(change_data)
+moderators <- readd(moderators)
+roc_data_intermediate <- readd(roc_data_intermediate)
+alphas <- readd(alphas)
+alert_data <- readd(alert_data)
+
+knitr::opts_chunk$set(echo = F, 
+                      fig.align = "center",
+                      fig.width = 4, 
+                      fig.height = 4, 
+                      dev = "png",
+                      cache = TRUE,
+                      cache.lazy = FALSE,
+                      message = F,
+                      warning = F)
+```
+
+A total of `r format_number(NROW(change_data))` clients from `r format_number(n_distinct(change_data$CcmhID))` center were included in analyses, although some subscales had reduced numbers due to clients not being able to go off track or deteriorate on certain subscales. Total clients and centers for each subscale are included in the results table for each model. Of the `r format_number(NROW(change_data))` clients, `r format_number(sum(change_data$feedback == 0))` were in the no feedback condition and `r format_number(sum(change_data$feedback == 1))` were in the feedback condition. Table X shows the data reduction process and the number of clients and centers lost at each step. 
+
+```{r data-flow-chart}
+readd(flow_chart) %>% 
+  knitr::kable()
+```
+
+```{r sessions}
+sessions <- group_by(roc_data, UniqueClientID) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(appt_N)
+```
+
+After removing sessions above 20, clients' attended from 3 to 20 individual sessions, with a mean of `r round(mean(sessions$appt_N),2)`, a SD of `r round(sd(sessions$appt_N),2)`, a median of `r median(sessions$appt_N)`, and a mode of `r CCMHr::get_mode(sessions$appt_N)`. Clients in the feedback condition had higher starting CCAPS scores on some subscales, consistent with increasing trends in CCAPS scores during the time period the data was collected (CITE HENRY). Clients in the feedback condition also attended .7 more sessions on average, had more frequent CCAPS administrations, and were less likely to have a prior hospitalization. Table X compares all moderators by feedback condition, as well as other demographic variables. 
+
+```{r moderators}
+mods_summary <- roc_data_intermediate %>% 
+  group_by(UniqueClientID) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  mutate(feedback = ifelse(feedback == 1, "Feedback", "No feedback"),
+         hospitalization = ifelse(hospitalization == 1, "Yes", "No"),
+         feedback = fct_relevel(feedback, "No feedback")) %>% 
+  select(feedback, Depression34:DI, hospitalization, appt_N, ccaps_frequency) 
+
+finalfit::summary_factorlist(mods_summary, dependent = "feedback", 
+                             explanatory = c("Depression34", "Anxiety34", "Social_Anxiety34", "Academics34", "Eating34", "Hostility34", "Alcohol34", "DI", "ccaps_frequency", "appt_N", "hospitalization"),
+                             p = F,
+                             add_col_totals = T,
+                             col_totals_rowname = "Total client N (%)",
+                             digits = c(2,2,2,2)) %>% 
+  mutate(label = str_remove(label, "34"),
+         label = fct_recode(label, "Academic Distress" = "Academics", 
+                           "Alcohol Use" = "Alcohol",
+                           "Eating Concerns" = "Eating",
+                           "Generalized Anxiety" = "Anxiety",
+                           "Distress Index" = "DI",
+                            "Social Anxiety" = "Social_Anxiety",
+                            `CCAPS frequency` = "ccaps_frequency",
+                           `Appointment N` = "appt_N",
+                           Hospitalization = "hospitalization")) %>% 
+  rename("Variable" = label, "Value" = levels) %>% 
+  knitr::kable(align=c("l", "l", "r", "r", "r"), caption = "Table 1: Predictor variables by feedback condition") %>% 
+  kableExtra::add_header_above(., header = c(" " = 2, "Condition" = 2)) %>% 
+  kableExtra::add_footnote("CCAPS subscales represent each client's initial value on that subscale.", 
+                           notation = "none", 
+                           escape = F)
+  
+  # TODO: add other demographic variables
+  # TODO: Add off track to table?
+```
+
+```{r alphas}
+# alphas <- alphas %>%
+#   column_to_rownames("Subscale") %>%
+#   t() %>%
+#   as_tibble() %>%
+#   mutate(alpha = "Overall alpha", .before = 1)
+```
+Internal consistencies for CCAPS subscales from data included in the present study were in line with established psychometrics for this scale, with alphas ranging from `r min(alphas$Alpha)` on `r str_remove(alphas$Subscale[which.min(alphas$Alpha)], "_")` and `r max(alphas$Alpha)` on `r alphas$Subscale[which.max(alphas$Alpha)]`. 
+
+```{r prop-alert}
+alerts <- group_by(roc_data, UniqueClientID, feedback) %>% 
+  summarize(across(contains("alert"), max, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(across(contains("alert"), function(x) ifelse(!is.finite(x), NA, x)))
+
+alerts_condition <- group_by(alerts, feedback) %>% 
+  summarize(across(contains("alert"), function(x) scales::percent(mean(x, na.rm = T), accuracy = .01)))
+
+alerts_overall <- summarize(alerts, across(contains("alert"), function(x) mean(x, na.rm = T))) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rename(alert_percent = V1) %>% 
+  rownames_to_column("subscale") %>% 
+  filter(subscale != "alert_any") %>% 
+  mutate(subscale = str_remove(subscale, "_alert"),
+         subscale = str_remove(subscale, "34")) 
+```
+Across both feedback conditions, `r scales::percent(mean(alerts$alert_any), accuracy = .01)` of clients went off track on at least one subscale at some point during treatment, and this was identical across no feedback and feedback conditions. The percentage of clients going off track on each subscale ranged from `r scales::percent(min(alerts_overall$alert_percent), .01)` on the `r alerts_overall$subscale[which.min(alerts_overall$alert_percent)]` to `r scales::percent(max(alerts_overall$alert_percent), .01)` on `r alerts_overall$subscale[which.max(alerts_overall$alert_percent)]`. The proportion of clients going off track on each subscale also did not differ between conditions. 
+
+```{r when-alert}
+mutate(alert_data, feedback = ifelse(Date <= "2015-07-01", 0, 1)) %>% 
+  group_by(appt_seq, subscale, feedback) %>% 
+  summarize(N = n(), alert_n = sum(alert), alert_prop = mean(alert)) %>% 
+  ungroup() %>% 
+  mutate(subscale = str_remove(subscale, "34"),
+         subscale = str_replace(subscale, "_", " "),
+         subscale = fct_recode(subscale, "Academic Distress" = "Academics", 
+                               "Alcohol Use" = "Alcohol",
+                               "Eating Concerns" = "Eating",
+                               "Generalized Anxiety" = "Anxiety",
+                               "Distress Index" = "DI"),
+         subscale = fct_relevel(subscale, "Depression", "Generalized Anxiety", "Social Anxiety", "Academic Distress", "Eating Concerns", "Alcohol Use", "Hostility", "Distress Index")) %>% mutate(feedback = ifelse(feedback == 1, "Feedback", "No feedback")) %>% 
+  ggplot(aes(x = appt_seq, y = alert_prop, group = feedback, color = feedback)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~subscale, scales = "free_x") +
+  scale_y_continuous(breaks = seq(.04,.16, .02), labels = scales::percent_format(accuracy = 1), limits = c(.04,.16)) +
+  scale_x_continuous(breaks = seq(0, 20, 5)) +
+  scale_color_manual(values = c("#244579FF", "#C6242DFF")) +
+  theme_bw() +
+  labs(title = "Proportion of Clients Off Track at Each Session",
+       x = "Appointment Number",
+       y = "Proportion of Clients Off Track") +
+  theme(panel.grid.minor = element_blank(),
+        legend.title = element_blank(),
+        legend.position = c(0.8, 0.2),
+        legend.background = element_blank(),
+        legend.box.background = element_rect(colour = "black"))
+```
+
+```{r number-alerts, eval=FALSE, include=FALSE}
+number_alerts <- group_by(alert_data, UniqueClientID) %>% 
+  select(UniqueClientID, subscale, alert, appt_seq) %>% 
+  pivot_wider(names_from = subscale, values_from = alert) %>% 
+  summarize(across(Depression34:DI, function(x) sum(x, na.rm = T)))
+
+number_alerts %>% 
+  pivot_longer(cols = c(Depression34:DI), names_to = "subscale", values_to = "total_alerts") %>% 
+  ggplot(aes(x = total_alerts)) +
+  geom_histogram() +
+  facet_wrap(~subscale)
+```
+
+
+

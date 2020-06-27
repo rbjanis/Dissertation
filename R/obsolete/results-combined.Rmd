@@ -1,0 +1,12 @@
+---
+output: word_document
+---
+
+```{r child = "results-writing.Rmd"}
+
+```
+
+```{r child = "tables.Rmd"}
+
+```
+
