@@ -5,7 +5,8 @@ Psychotherapy feedback on the counseling center assessment of
 psychological symptoms (CCAPS): Effects on outcome and client moderators
 of effectiveness
 
-PhD dissertation, Rebecca Janis. Defended on June 11, 2020.
+Rebecca Janis dissertation for psychology PhD at Pennsylvania State
+University. Defended on June 11, 2020.
 
 While psychotherapy is largely effective, some clients do not improve
 and even get worse during treatment. Psychotherapy routine outcome
